@@ -1,0 +1,314 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Falling Blocks Game</title>
+    <style>
+        :root {
+            --cell-size: 50px;
+            --transition-time: 1s;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to right, blue, black);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            color: white;
+            overflow: hidden;
+        }
+        #game {
+            background-color: transparent;
+            padding: 20px;
+            border-radius: 10px;
+            
+            text-align: center;
+            width: 100%;
+            max-width: calc(100vw - 40px);
+            max-height: calc(100vh - 40px);
+            min-width: 343.5px;
+        }
+        #controls {
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+        }
+        #difficulty {
+            padding: 8px;
+            border-radius: 5px;
+            background: #333;
+            color: white;
+            cursor: pointer;
+        }
+        button {
+            padding: 8px 12px;
+            border-radius: 5px;
+            border: none;
+            background: #4CAF50;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #score {
+            font-size: 20px;
+            font-weight: bold;
+        }
+        #grid {
+            width: 100%;
+            position: relative;
+            overflow: hidden;
+            border: 2px solid #3a3a3a;
+            background: #333;
+            border-radius: 5px;
+            display: grid;
+            grid-template-columns: repeat(6, var(--cell-size));
+            grid-auto-rows: var(--cell-size);
+        }
+        .cell {
+            border: 1px solid #7d7d7d;
+        }
+        .block {
+            position: absolute;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            transition: transform 0.1s ease, top var(--transition-time) linear;
+            width: var(--cell-size);
+            height: var(--cell-size);
+        }
+        .block:active {
+            transform: scale(0.95);
+        }
+        .number {
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px black;
+        }
+        .red { background-color: #ff0000; }
+        .blue { background-color: #0000ff; }
+        .green { background-color: #00ff00; }
+        .orange { background-color: #ffa500; }
+        .purple { background-color: #ff00ff; }
+        svg {
+            width: 16px;
+            height: 16px;
+            fill: white;
+        }
+    </style>
+</head>
+<body>
+    <div id="game">
+        <div id="controls">
+            <select id="difficulty">
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+            </select>
+            <button id="newGame"></button>
+            <button id="pause"></button>
+            <span id="score">Score: 0</span>
+        </div>
+        <div id="grid"></div>
+    </div>
+    <script>
+        const config = {
+            easy: { types: ['red', 'blue', 'green'], maxClicks: [1, 2, 3], fallSpeed: 1000, spawnSpeed: 800 },
+            medium: { types: ['red', 'blue', 'green', 'orange', 'purple'], maxClicks: [1, 2, 3, 4, 5], fallSpeed: 800, spawnSpeed: 600 },
+            hard: { types: ['red', 'blue', 'green', 'orange', 'purple'], maxClicks: [1, 2, 3, 4, 5], fallSpeed: 500, spawnSpeed: 400 }
+        };
+
+        const cols = 6;
+        const rows = 12;
+        let falling = [];
+        let intervalFall, intervalSpawn;
+        let paused = false;
+        let gameOverFlag = false;
+        let currentDiff = 'easy';
+        let score = 0;
+        let cellSize;
+
+        const gridDiv = document.getElementById('grid');
+        const scoreSpan = document.getElementById('score');
+        const pauseButton = document.getElementById('pause');
+        const newGameButton = document.getElementById('newGame');
+
+        const refreshSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>';
+        const pauseSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>';
+        const playSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+
+        newGameButton.innerHTML = refreshSVG;
+
+        // Create grid cells
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const cell = document.createElement('div');
+                cell.classList.add('cell');
+                gridDiv.appendChild(cell);
+            }
+        }
+
+        function updateGridSize() {
+            // Calculate available space
+            const viewportWidth = window.innerWidth - 40; // Account for body margin/padding
+            const viewportHeight = window.innerHeight - 40; // Account for body margin/padding
+            const controlsHeight = document.getElementById('controls').offsetHeight + 15; // Include margin
+            const maxGridWidth = viewportWidth - 40; // Account for game padding
+            const maxGridHeight = viewportHeight - controlsHeight - 40; // Account for game padding
+
+            // Calculate cell size to fit within viewport
+            const cellSizeWidth = Math.floor(maxGridWidth / cols);
+            const cellSizeHeight = Math.floor(maxGridHeight / rows);
+            cellSize = Math.min(cellSizeWidth, cellSizeHeight, 50); // Cap at 50px for aesthetics
+
+            // Update CSS variable
+            document.documentElement.style.setProperty('--cell-size', `${cellSize}px`);
+
+            // Set game container size to prevent overflow
+            const gameContainer = document.getElementById('game');
+            gameContainer.style.maxWidth = `${cellSize * cols + 40}px`; // Include padding
+            gameContainer.style.maxHeight = `${cellSize * rows + controlsHeight + 40}px`; // Include padding and controls
+
+            // Reposition all blocks
+            falling.forEach(b => positionBlock(b.elem, b.row, b.col));
+        }
+
+        function startGame() {
+            clearGame();
+            updateGridSize();
+            document.documentElement.style.setProperty('--transition-time', `${config[currentDiff].fallSpeed / 1000}s`);
+            intervalFall = setInterval(moveDown, config[currentDiff].fallSpeed);
+            intervalSpawn = setInterval(spawnBlock, config[currentDiff].spawnSpeed);
+            paused = false;
+            gameOverFlag = false;
+            updatePauseButton();
+        }
+
+        function clearGame() {
+            if (intervalFall) clearInterval(intervalFall);
+            if (intervalSpawn) clearInterval(intervalSpawn);
+            falling = [];
+            gridDiv.querySelectorAll('.block').forEach(el => el.remove());
+            score = 0;
+            updateScore();
+        }
+
+        function spawnBlock() {
+            if (paused || gameOverFlag) return;
+            let col = Math.floor(Math.random() * cols);
+            if (falling.some(f => f.row === 0 && f.col === col)) return; // Skip if top occupied in same column
+            const types = config[currentDiff].types;
+            const idx = Math.floor(Math.random() * types.length);
+            const type = types[idx];
+            const remaining = config[currentDiff].maxClicks[idx];
+            const block = document.createElement('div');
+            block.classList.add('block', type);
+            const num = document.createElement('span');
+            num.classList.add('number');
+            num.textContent = remaining;
+            block.appendChild(num);
+            gridDiv.appendChild(block);
+            positionBlock(block, 0, col);
+            block.addEventListener('click', () => handleClick(block));
+            falling.push({ row: 0, col, type, remaining, elem: block });
+        }
+
+        function positionBlock(elem, row, col) {
+            elem.style.left = `${col * cellSize}px`;
+            elem.style.top = `${row * cellSize}px`;
+        }
+
+        function moveDown() {
+            if (paused || gameOverFlag) return;
+            for (let i = falling.length - 1; i >= 0; i--) {
+                const b = falling[i];
+                b.row++;
+                positionBlock(b.elem, b.row, b.col);
+                if (b.row >= rows) {
+                    b.elem.remove();
+                    falling.splice(i, 1);
+                    triggerGameOver();
+                }
+            }
+        }
+
+        function triggerGameOver() {
+            if (!gameOverFlag) {
+                gameOverFlag = true;
+                clearInterval(intervalFall);
+                clearInterval(intervalSpawn);
+                alert(`Game Over! A block fell off the grid. Score: ${score}`);
+                startGame();
+            }
+        }
+
+        function handleClick(elem) {
+            if (paused || gameOverFlag) return;
+            for (let i = 0; i < falling.length; i++) {
+                if (falling[i].elem === elem) {
+                    falling[i].remaining--;
+                    elem.querySelector('.number').textContent = falling[i].remaining;
+                    if (falling[i].remaining <= 0) {
+                        elem.remove();
+                        falling.splice(i, 1);
+                        score += 10;
+                        updateScore();
+                    }
+                    break;
+                }
+            }
+        }
+
+        function updateScore() {
+            scoreSpan.textContent = `Score: ${score}`;
+        }
+
+        function updatePauseButton() {
+            pauseButton.innerHTML = paused ? playSVG : pauseSVG;
+        }
+
+        newGameButton.addEventListener('click', () => {
+            currentDiff = document.getElementById('difficulty').value;
+            startGame();
+        });
+
+        pauseButton.addEventListener('click', () => {
+            paused = !paused;
+            updatePauseButton();
+        });
+
+        window.addEventListener('resize', updateGridSize);
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'n') {
+                newGameButton.click();
+            } else if (e.key === 'p' || e.key === ' ') {
+                pauseButton.click();
+            }
+        });
+
+        // Initial setup
+        updateGridSize();
+        updatePauseButton();
+    </script>
+</body>
+</html>
